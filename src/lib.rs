@@ -21,6 +21,7 @@ pub enum AllocationType {
     PersistentRo = ffi::TfLiteAllocationType_kTfLitePersistentRo,
 }
 
+#[cfg(feature = "experimental")]
 #[derive(FromPrimitive, ToPrimitive)]
 #[repr(u32)]
 pub enum BuiltinOperator {
@@ -466,6 +467,7 @@ impl Interpreter {
         Self::from(ptr)
     }
 
+    #[cfg(feature = "experimental")]
     pub fn create_with_selected_ops(model: &Model, options: &InterpreterOptions) -> Self {
         let ptr = unsafe { ffi::TfLiteInterpreterCreateWithSelectedOps(model.ptr, options.ptr) };
         Self::from(ptr)
@@ -493,6 +495,7 @@ impl Interpreter {
             .into()
     }
 
+    #[cfg(feature = "experimental")]
     pub fn reset_variable_tensor(&mut self) -> Result {
         TFLiteStatus::from_u32(unsafe { ffi::TfLiteInterpreterResetVariableTensors(self.ptr) })
             .unwrap()
@@ -555,6 +558,7 @@ pub struct InterpreterOptions {
 }
 
 impl InterpreterOptions {
+    #[cfg(feature = "experimental")]
     /// Adds an op registration for a builtin operator.
     pub fn add_builtin_op(
         &mut self,
@@ -574,6 +578,7 @@ impl InterpreterOptions {
         }
     }
 
+    #[cfg(feature = "experimental")]
     /// Adds an op registration for a custom operator.
     pub fn add_custom_op(
         &mut self,
@@ -629,6 +634,7 @@ impl InterpreterOptions {
     }
     */
 
+    #[cfg(feature = "experimental")]
     /// Enable or disable the NN API for the interpreter (true to enable).
     /// *WARNING*: This is an experimental API and subject to change.
     pub fn set_use_nnapi(&mut self, enable: bool) {
@@ -654,52 +660,61 @@ pub fn version() -> &'static str {
         .unwrap()
 }
 
-pub struct XNNPackDelegateOptions {
-    options: ffi::TfLiteXNNPackDelegateOptions,
-    num_threads: i32,
-}
+#[cfg(feature = "xnnpack")]
+mod xnnpack {
+    use super::*;
 
-impl Default for XNNPackDelegateOptions {
-    fn default() -> Self {
-        XNNPackDelegateOptions {
-            options: unsafe { ffi::TfLiteXNNPackDelegateOptionsDefault() },
-            num_threads: 0,
+    pub struct XNNPackDelegateOptions {
+        options: ffi::TfLiteXNNPackDelegateOptions,
+        num_threads: i32,
+    }
+
+    impl Default for XNNPackDelegateOptions {
+        fn default() -> Self {
+            XNNPackDelegateOptions {
+                options: unsafe { ffi::TfLiteXNNPackDelegateOptionsDefault() },
+                num_threads: 0,
+            }
+        }
+    }
+
+    impl XNNPackDelegateOptions {
+        pub fn set_num_threads(&mut self, num_threads: i32) {
+            self.num_threads = num_threads;
+            self.options.num_threads = num_threads;
+        }
+
+        fn ptr(&self) -> *const ffi::TfLiteXNNPackDelegateOptions {
+            &self.options as *const ffi::TfLiteXNNPackDelegateOptions
+        }
+    }
+
+    pub struct XNNPackDelegate {
+        c_ptr: *mut ffi::TfLiteDelegate,
+    }
+
+    impl XNNPackDelegate {
+        pub fn new(options: Option<XNNPackDelegateOptions>) -> Self {
+            let c_ptr =
+                unsafe { ffi::TfLiteXNNPackDelegateCreate(options.unwrap_or_default().ptr()) };
+            Self { c_ptr }
+        }
+    }
+
+    impl Drop for XNNPackDelegate {
+        fn drop(&mut self) {
+            unsafe {
+                ffi::TfLiteXNNPackDelegateDelete(self.c_ptr);
+            }
+        }
+    }
+
+    impl Delegate for XNNPackDelegate {
+        fn c_delegate_ptr(&mut self) -> *mut ffi::TfLiteDelegate {
+            self.c_ptr
         }
     }
 }
 
-impl XNNPackDelegateOptions {
-    pub fn set_num_threads(&mut self, num_threads: i32) {
-        self.num_threads = num_threads;
-        self.options.num_threads = num_threads;
-    }
-
-    fn ptr(&self) -> *const ffi::TfLiteXNNPackDelegateOptions {
-        &self.options as *const ffi::TfLiteXNNPackDelegateOptions
-    }
-}
-
-pub struct XNNPackDelegate {
-    c_ptr: *mut ffi::TfLiteDelegate,
-}
-
-impl XNNPackDelegate {
-    pub fn new(options: Option<XNNPackDelegateOptions>) -> Self {
-        let c_ptr = unsafe { ffi::TfLiteXNNPackDelegateCreate(options.unwrap_or_default().ptr()) };
-        Self { c_ptr }
-    }
-}
-
-impl Drop for XNNPackDelegate {
-    fn drop(&mut self) {
-        unsafe {
-            ffi::TfLiteXNNPackDelegateDelete(self.c_ptr);
-        }
-    }
-}
-
-impl Delegate for XNNPackDelegate {
-    fn c_delegate_ptr(&mut self) -> *mut ffi::TfLiteDelegate {
-        self.c_ptr
-    }
-}
+#[cfg(feature = "xnnpack")]
+pub use xnnpack::*;

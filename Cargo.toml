@@ -12,3 +12,9 @@ num-complex = "0.3"
 num-traits = "0.2"
 num-derive = "0.3"
 thiserror = "1.0"
+
+[features]
+default = [ "v2.4", "xnnpack" ]
+"v2.4" = [ "tensorflow-lite-sys/v2.4" ]
+xnnpack = [ "tensorflow-lite-sys/xnnpack" ]
+experimental = [ "tensorflow-lite-sys/experimental" ]
