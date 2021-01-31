@@ -192,7 +192,7 @@ pub enum TFLiteError {
     InterpreterError, // (#[from] ffi::TfLiteStatus_kTfLiteError),
 }
 
-type Result = std::result::Result<(), TFLiteError>;
+pub type Result = std::result::Result<(), TFLiteError>;
 
 #[derive(FromPrimitive, ToPrimitive)]
 #[repr(u32)]
@@ -233,7 +233,7 @@ pub enum Type {
 }
 
 impl Type {
-    fn name(&self) -> &str {
+    pub fn name(&self) -> &str {
         unsafe { CStr::from_ptr(ffi::TfLiteTypeGetName(self.to_u32().unwrap())) }
             .to_str()
             .unwrap()
@@ -253,12 +253,12 @@ pub struct Model {
 }
 
 impl Model {
-    fn create(data: &[u8]) -> Self {
+    pub fn create(data: &[u8]) -> Self {
         let ptr = unsafe { ffi::TfLiteModelCreate(data.as_ptr() as *const c_void, data.len()) };
         Self { ptr }
     }
 
-    fn create_from_file<P: AsRef<Path>>(path: P) -> Self {
+    pub fn create_from_file<P: AsRef<Path>>(path: P) -> Self {
         let ptr = unsafe {
             let cstr = CString::new(path.as_ref().to_str().unwrap()).unwrap();
             ffi::TfLiteModelCreateFromFile(cstr.as_ptr())
@@ -287,7 +287,7 @@ pub struct ImmutableTensor {
     shape: Vec<usize>,
 }
 
-trait Ptr {
+pub trait Ptr {
     fn ptr(&self) -> *const ffi::TfLiteTensor;
 }
 
@@ -308,7 +308,7 @@ impl MutableTensor {
         self.ptr
     }
 
-    fn data_mut(&mut self) -> &mut [u8] {
+    pub fn data_mut(&mut self) -> &mut [u8] {
         unsafe {
             std::slice::from_raw_parts_mut(
                 ffi::TfLiteTensorData(self.ptr) as *mut u8,
@@ -317,7 +317,7 @@ impl MutableTensor {
         }
     }
 
-    fn copy_from_buffer(&mut self, buffer: &[u8]) {
+    pub fn copy_from_buffer(&mut self, buffer: &[u8]) {
         unsafe {
             ffi::TfLiteTensorCopyFromBuffer(
                 self.ptr,
@@ -331,7 +331,7 @@ impl MutableTensor {
         unsafe { ffi::TfLiteTensorDataFree(self.ptr_mut()) }
     }
 
-    fn from_raw(ptr: *mut ffi::TfLiteTensor) -> Self {
+    pub fn from_raw(ptr: *mut ffi::TfLiteTensor) -> Self {
         let mut shape = Vec::new();
         let ndim = unsafe { ffi::TfLiteTensorNumDims(ptr) };
         for dim in 0..ndim {
@@ -344,13 +344,17 @@ impl MutableTensor {
         }
     }
 
-    fn shape(&mut self) -> &[usize] {
+    pub fn shape(&self) -> &[usize] {
         self.shape.as_slice()
+    }
+
+    pub fn ndim(&self) -> usize {
+        self.ndim
     }
 }
 
 impl ImmutableTensor {
-    fn data(&self) -> &[u8] {
+    pub fn data(&self) -> &[u8] {
         unsafe {
             std::slice::from_raw_parts(
                 ffi::TfLiteTensorData(self.ptr) as *mut u8,
@@ -359,7 +363,7 @@ impl ImmutableTensor {
         }
     }
 
-    fn copy_to_buffer(&self, buffer: &mut [u8]) {
+    pub fn copy_to_buffer(&self, buffer: &mut [u8]) {
         unsafe {
             ffi::TfLiteTensorCopyToBuffer(
                 self.ptr,
@@ -369,7 +373,7 @@ impl ImmutableTensor {
         }
     }
 
-    fn from_raw(ptr: *const ffi::TfLiteTensor) -> Self {
+    pub fn from_raw(ptr: *const ffi::TfLiteTensor) -> Self {
         let mut shape = Vec::new();
         let ndim = unsafe { ffi::TfLiteTensorNumDims(ptr) };
         for dim in 0..ndim {
@@ -382,8 +386,12 @@ impl ImmutableTensor {
         }
     }
 
-    fn shape(&mut self) -> &[usize] {
+    pub fn shape(&self) -> &[usize] {
         self.shape.as_slice()
+    }
+
+    pub fn ndim(&self) -> usize {
+        self.ndim
     }
 }
 
@@ -436,21 +444,21 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    fn allocate_tensors(&mut self) -> Result {
+    pub fn allocate_tensors(&mut self) -> Result {
         TFLiteStatus::from_u32(unsafe { ffi::TfLiteInterpreterAllocateTensors(self.ptr) })
             .unwrap()
             .into()
     }
 
-    fn new(model: &Model) -> Self {
+    pub fn new(model: &Model) -> Self {
         Self::create(model, None)
     }
 
-    fn new_with_options(model: &Model, options: &InterpreterOptions) -> Self {
+    pub fn new_with_options(model: &Model, options: &InterpreterOptions) -> Self {
         Self::create(model, Some(options))
     }
 
-    fn create(model: &Model, options: Option<&InterpreterOptions>) -> Self {
+    pub fn create(model: &Model, options: Option<&InterpreterOptions>) -> Self {
         let ptr = match options {
             Some(options) => unsafe { ffi::TfLiteInterpreterCreate(model.ptr, options.ptr) },
             None => unsafe { ffi::TfLiteInterpreterCreate(model.ptr, std::ptr::null()) },
@@ -458,40 +466,40 @@ impl Interpreter {
         Self::from(ptr)
     }
 
-    fn create_with_selected_ops(model: &Model, options: &InterpreterOptions) -> Self {
+    pub fn create_with_selected_ops(model: &Model, options: &InterpreterOptions) -> Self {
         let ptr = unsafe { ffi::TfLiteInterpreterCreateWithSelectedOps(model.ptr, options.ptr) };
         Self::from(ptr)
     }
 
-    fn get_input_tensor(&mut self, input_index: usize) -> Option<&mut MutableTensor> {
+    pub fn get_input_tensor(&mut self, input_index: usize) -> Option<&mut MutableTensor> {
         self.input_tensors.get_mut(input_index)
     }
 
-    fn get_input_tensor_count(&self) -> i32 {
+    pub fn get_input_tensor_count(&self) -> i32 {
         self.input_tensor_count
     }
 
-    fn get_output_tensor(&self, output_index: usize) -> Option<&ImmutableTensor> {
+    pub fn get_output_tensor(&self, output_index: usize) -> Option<&ImmutableTensor> {
         self.output_tensors.get(output_index)
     }
 
-    fn get_output_tensor_count(&self) -> i32 {
+    pub fn get_output_tensor_count(&self) -> i32 {
         self.output_tensor_count
     }
 
-    fn invoke(&mut self) -> Result {
+    pub fn invoke(&mut self) -> Result {
         TFLiteStatus::from_u32(unsafe { ffi::TfLiteInterpreterInvoke(self.ptr) })
             .unwrap()
             .into()
     }
 
-    fn reset_variable_tensor(&mut self) -> Result {
+    pub fn reset_variable_tensor(&mut self) -> Result {
         TFLiteStatus::from_u32(unsafe { ffi::TfLiteInterpreterResetVariableTensors(self.ptr) })
             .unwrap()
             .into()
     }
 
-    fn resize_input_tensor(&mut self, input_index: i32, input_dims: &[i32]) -> Result {
+    pub fn resize_input_tensor(&mut self, input_index: i32, input_dims: &[i32]) -> Result {
         TFLiteStatus::from_u32(unsafe {
             ffi::TfLiteInterpreterResizeInputTensor(
                 self.ptr,
@@ -548,7 +556,7 @@ pub struct InterpreterOptions {
 
 impl InterpreterOptions {
     /// Adds an op registration for a builtin operator.
-    fn add_builtin_op(
+    pub fn add_builtin_op(
         &mut self,
         op: BuiltinOperator,
         registration: &Registration,
@@ -567,14 +575,13 @@ impl InterpreterOptions {
     }
 
     /// Adds an op registration for a custom operator.
-    fn add_custom_op(
+    pub fn add_custom_op(
         &mut self,
         name: &str,
         registration: &Registration,
         min_version: i32,
         max_version: i32,
     ) {
-        // *const c_char, )
         unsafe {
             ffi::TfLiteInterpreterOptionsAddCustomOp(
                 self.ptr,
@@ -586,7 +593,7 @@ impl InterpreterOptions {
         }
     }
 
-    fn add_delegate<D: Delegate>(&mut self, delegate: &mut D) {
+    pub fn add_delegate<D: Delegate>(&mut self, delegate: &mut D) {
         unsafe {
             ffi::TfLiteInterpreterOptionsAddDelegate(
                 self.ptr,
@@ -600,7 +607,7 @@ impl InterpreterOptions {
         Self { ptr }
     }
 
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self::create()
     }
 
@@ -613,7 +620,7 @@ impl InterpreterOptions {
         // user_data: *mut c_void
     }
     */
-    fn set_num_threads(&mut self, num_threads: i32) {
+    pub fn set_num_threads(&mut self, num_threads: i32) {
         unsafe { ffi::TfLiteInterpreterOptionsSetNumThreads(self.ptr, num_threads) }
     }
 
@@ -629,7 +636,7 @@ impl InterpreterOptions {
 
     /// Enable or disable the NN API for the interpreter (true to enable).
     /// *WARNING*: This is an experimental API and subject to change.
-    fn set_use_nnapi(&mut self, enable: bool) {
+    pub fn set_use_nnapi(&mut self, enable: bool) {
         unsafe { ffi::TfLiteInterpreterOptionsSetUseNNAPI(self.ptr, enable) };
     }
 }
@@ -646,7 +653,7 @@ impl Drop for InterpreterOptions {
     }
 }
 
-fn version() -> &'static str {
+pub fn version() -> &'static str {
     unsafe { CStr::from_ptr(ffi::TfLiteVersion()) }
         .to_str()
         .unwrap()
@@ -667,7 +674,7 @@ impl Default for XNNPackDelegateOptions {
 }
 
 impl XNNPackDelegateOptions {
-    fn set_num_threads(&mut self, num_threads: i32) {
+    pub fn set_num_threads(&mut self, num_threads: i32) {
         self.num_threads = num_threads;
         self.options.num_threads = num_threads;
     }
@@ -682,9 +689,9 @@ pub struct XNNPackDelegate {
 }
 
 impl XNNPackDelegate {
-    fn new(options: Option<XNNPackDelegateOptions>) -> Self {
+    pub fn new(options: Option<XNNPackDelegateOptions>) -> Self {
         let ptr = unsafe { ffi::TfLiteXNNPackDelegateCreate(options.unwrap_or_default().ptr()) };
-        XNNPackDelegate { ptr }
+        Self { ptr }
     }
 }
 
