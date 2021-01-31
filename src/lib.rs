@@ -318,14 +318,16 @@ impl MutableTensor {
         }
     }
 
-    pub fn copy_from_buffer(&mut self, buffer: &[u8]) {
-        unsafe {
+    pub fn copy_from_buffer(&mut self, buffer: &[u8]) -> Result {
+        TFLiteStatus::from_u32(unsafe {
             ffi::TfLiteTensorCopyFromBuffer(
                 self.ptr,
                 buffer.as_ptr() as *const c_void,
                 buffer.len(),
-            );
-        }
+            )
+        })
+        .unwrap()
+        .into()
     }
 
     fn data_free(&mut self) {
@@ -364,14 +366,16 @@ impl ImmutableTensor {
         }
     }
 
-    pub fn copy_to_buffer(&self, buffer: &mut [u8]) {
-        unsafe {
+    pub fn copy_to_buffer(&self, buffer: &mut [u8]) -> Result {
+        TFLiteStatus::from_u32(unsafe {
             ffi::TfLiteTensorCopyToBuffer(
                 self.ptr,
                 buffer.as_mut_ptr() as *mut c_void,
                 buffer.len(),
-            );
-        }
+            )
+        })
+        .unwrap()
+        .into()
     }
 
     pub fn from_raw(ptr: *const ffi::TfLiteTensor) -> Self {
