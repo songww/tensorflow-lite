@@ -241,7 +241,7 @@ impl Type {
 }
 
 pub trait Delegate {
-    fn as_mut_ptr(&mut self) -> *mut Self;
+    fn c_delegate_ptr(&mut self) -> *mut ffi::TfLiteDelegate;
 }
 
 pub struct Registration {
@@ -594,12 +594,7 @@ impl InterpreterOptions {
     }
 
     pub fn add_delegate<D: Delegate>(&mut self, delegate: &mut D) {
-        unsafe {
-            ffi::TfLiteInterpreterOptionsAddDelegate(
-                self.ptr,
-                delegate.as_mut_ptr() as *mut ffi::TfLiteDelegate,
-            )
-        }
+        unsafe { ffi::TfLiteInterpreterOptionsAddDelegate(self.ptr, delegate.c_delegate_ptr()) }
     }
 
     fn create() -> Self {
@@ -685,20 +680,26 @@ impl XNNPackDelegateOptions {
 }
 
 pub struct XNNPackDelegate {
-    ptr: *mut ffi::TfLiteDelegate,
+    c_ptr: *mut ffi::TfLiteDelegate,
 }
 
 impl XNNPackDelegate {
     pub fn new(options: Option<XNNPackDelegateOptions>) -> Self {
-        let ptr = unsafe { ffi::TfLiteXNNPackDelegateCreate(options.unwrap_or_default().ptr()) };
-        Self { ptr }
+        let c_ptr = unsafe { ffi::TfLiteXNNPackDelegateCreate(options.unwrap_or_default().ptr()) };
+        Self { c_ptr }
     }
 }
 
 impl Drop for XNNPackDelegate {
     fn drop(&mut self) {
         unsafe {
-            ffi::TfLiteXNNPackDelegateDelete(self.ptr);
+            ffi::TfLiteXNNPackDelegateDelete(self.c_ptr);
         }
+    }
+}
+
+impl Delegate for XNNPackDelegate {
+    fn c_delegate_ptr(&mut self) -> *mut ffi::TfLiteDelegate {
+        self.c_ptr
     }
 }
