@@ -16,5 +16,8 @@ thiserror = "1.0"
 [features]
 default = [ "v2.4", "xnnpack" ]
 "v2.4" = [ "tensorflow-lite-sys/v2.4" ]
+gpu = [ "tensorflow-lite-sys/gpu" ]
+metal = [ "tensorflow-lite-sys/metal" ]
+coreml = [ "tensorflow-lite-sys/coreml" ]
 xnnpack = [ "tensorflow-lite-sys/xnnpack" ]
 experimental = [ "tensorflow-lite-sys/experimental" ]

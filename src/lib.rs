@@ -1,5 +1,5 @@
 use std::ffi::{c_void, CStr, CString};
-use std::os::raw::c_char;
+//use std::os::raw::c_char;
 use std::path::Path;
 use tensorflow_lite_sys as ffi;
 
@@ -8,6 +8,13 @@ extern crate num_derive;
 use num_traits::{FromPrimitive, ToPrimitive};
 
 use thiserror::Error;
+
+#[cfg(feature = "coreml")]
+pub mod coreml;
+#[cfg(feature = "gpu")]
+pub mod gpu;
+#[cfg(feature = "metal")]
+pub mod metal;
 
 #[derive(FromPrimitive, ToPrimitive)]
 #[repr(u32)]
@@ -242,11 +249,11 @@ impl Type {
 }
 
 pub trait Delegate {
-    fn c_delegate_ptr(&mut self) -> *mut ffi::TfLiteDelegate;
+    fn as_mut_ptr(&mut self) -> *mut ffi::TfLiteDelegate;
 }
 
 pub struct Registration {
-    ptr: *mut ffi::TfLiteRegistration,
+    _ptr: *mut ffi::TfLiteRegistration,
 }
 
 pub struct Model {
@@ -288,32 +295,32 @@ pub struct ImmutableTensor {
     shape: Vec<usize>,
 }
 
-pub trait Ptr {
-    fn ptr(&self) -> *const ffi::TfLiteTensor;
+pub trait TensorPtr {
+    fn as_ptr(&self) -> *const ffi::TfLiteTensor;
 }
 
-impl Ptr for MutableTensor {
-    fn ptr(&self) -> *const ffi::TfLiteTensor {
+impl TensorPtr for MutableTensor {
+    fn as_ptr(&self) -> *const ffi::TfLiteTensor {
         self.ptr
     }
 }
 
-impl Ptr for ImmutableTensor {
-    fn ptr(&self) -> *const ffi::TfLiteTensor {
+impl TensorPtr for ImmutableTensor {
+    fn as_ptr(&self) -> *const ffi::TfLiteTensor {
         self.ptr
     }
 }
 
 impl MutableTensor {
-    fn ptr_mut(&mut self) -> *mut ffi::TfLiteTensor {
+    fn as_mut_ptr(&mut self) -> *mut ffi::TfLiteTensor {
         self.ptr
     }
 
     pub fn data_mut(&mut self) -> &mut [u8] {
         unsafe {
             std::slice::from_raw_parts_mut(
-                ffi::TfLiteTensorData(self.ptr) as *mut u8,
-                ffi::TfLiteTensorByteSize(self.ptr),
+                ffi::TfLiteTensorData(self.as_mut_ptr()) as *mut u8,
+                ffi::TfLiteTensorByteSize(self.as_mut_ptr()),
             )
         }
     }
@@ -321,7 +328,7 @@ impl MutableTensor {
     pub fn copy_from_buffer(&mut self, buffer: &[u8]) -> Result {
         TFLiteStatus::from_u32(unsafe {
             ffi::TfLiteTensorCopyFromBuffer(
-                self.ptr,
+                self.as_mut_ptr(),
                 buffer.as_ptr() as *const c_void,
                 buffer.len(),
             )
@@ -330,9 +337,11 @@ impl MutableTensor {
         .into()
     }
 
+    /*
     fn data_free(&mut self) {
-        unsafe { ffi::TfLiteTensorDataFree(self.ptr_mut()) }
+        unsafe { ffi::TfLiteTensorDataFree(self.as_mut_ptr()) }
     }
+    */
 
     pub fn from_raw(ptr: *mut ffi::TfLiteTensor) -> Self {
         let mut shape = Vec::new();
@@ -400,21 +409,21 @@ impl ImmutableTensor {
     }
 }
 
-pub trait Tensor: Ptr {
+pub trait Tensor: TensorPtr {
     fn byte_size(&self) -> usize {
-        unsafe { ffi::TfLiteTensorByteSize(self.ptr()) }
+        unsafe { ffi::TfLiteTensorByteSize(self.as_ptr()) }
     }
 
     fn ndim(&self) -> i32 {
-        unsafe { ffi::TfLiteTensorNumDims(self.ptr()) }
+        unsafe { ffi::TfLiteTensorNumDims(self.as_ptr()) }
     }
 
-    fn data_type(&self) -> Type {
-        Type::from_u32(unsafe { ffi::TfLiteTensorType(self.ptr()) }).unwrap()
+    fn dtype(&self) -> Type {
+        Type::from_u32(unsafe { ffi::TfLiteTensorType(self.as_ptr()) }).unwrap()
     }
 
     fn name(&self) -> &str {
-        unsafe { CStr::from_ptr(ffi::TfLiteTensorName(self.ptr())) }
+        unsafe { CStr::from_ptr(ffi::TfLiteTensorName(self.as_ptr())) }
             .to_str()
             .unwrap()
     }
@@ -603,7 +612,7 @@ impl InterpreterOptions {
     }
 
     pub fn add_delegate<D: Delegate>(&mut self, delegate: &mut D) {
-        unsafe { ffi::TfLiteInterpreterOptionsAddDelegate(self.ptr, delegate.c_delegate_ptr()) }
+        unsafe { ffi::TfLiteInterpreterOptionsAddDelegate(self.ptr, delegate.as_mut_ptr()) }
     }
 
     fn create() -> Self {
@@ -675,9 +684,10 @@ mod xnnpack {
 
     impl Default for XNNPackDelegateOptions {
         fn default() -> Self {
+            let options = unsafe { ffi::TfLiteXNNPackDelegateOptionsDefault() };
             XNNPackDelegateOptions {
-                options: unsafe { ffi::TfLiteXNNPackDelegateOptionsDefault() },
-                num_threads: 0,
+                options,
+                num_threads: options.num_threads,
             }
         }
     }
@@ -688,7 +698,11 @@ mod xnnpack {
             self.options.num_threads = num_threads;
         }
 
-        fn ptr(&self) -> *const ffi::TfLiteXNNPackDelegateOptions {
+        pub fn num_threads(&self) -> i32 {
+            self.num_threads
+        }
+
+        fn as_ptr(&self) -> *const ffi::TfLiteXNNPackDelegateOptions {
             &self.options as *const ffi::TfLiteXNNPackDelegateOptions
         }
     }
@@ -700,7 +714,7 @@ mod xnnpack {
     impl XNNPackDelegate {
         pub fn new(options: Option<XNNPackDelegateOptions>) -> Self {
             let c_ptr =
-                unsafe { ffi::TfLiteXNNPackDelegateCreate(options.unwrap_or_default().ptr()) };
+                unsafe { ffi::TfLiteXNNPackDelegateCreate(options.unwrap_or_default().as_ptr()) };
             Self { c_ptr }
         }
     }
@@ -714,7 +728,7 @@ mod xnnpack {
     }
 
     impl Delegate for XNNPackDelegate {
-        fn c_delegate_ptr(&mut self) -> *mut ffi::TfLiteDelegate {
+        fn as_mut_ptr(&mut self) -> *mut ffi::TfLiteDelegate {
             self.c_ptr
         }
     }
