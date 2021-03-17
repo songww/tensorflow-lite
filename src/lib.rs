@@ -1,5 +1,4 @@
 use std::ffi::{c_void, CStr, CString};
-//use std::os::raw::c_char;
 use std::path::Path;
 use tensorflow_lite_sys as ffi;
 
@@ -247,6 +246,44 @@ impl Type {
             .unwrap()
     }
 }
+
+trait DType {
+    fn dtype() -> Type;
+}
+
+macro_rules! impl_dtype {
+    ($type:ty, $dtype:path) => {
+        impl DType for $type {
+            fn dtype() -> Type {
+                $dtype
+            }
+        }
+    };
+}
+
+#[cfg(features = "half")]
+use half::f16;
+#[cfg(features = "half")]
+impl_dtype!(f16, Type::Float16);
+
+#[cfg(features = "complex")]
+use num_complex::Complex;
+
+#[cfg(features = "complex")]
+impl_dtype!(Complex<f64>, Type::Complex64);
+
+#[cfg(all(features = "complex", features = "f128"))]
+impl_dtype!(Complex<f128>, Type::Complex128);
+
+impl_dtype!(bool, Type::Bool);
+impl_dtype!(f32, Type::Float32);
+impl_dtype!(f64, Type::Float64);
+impl_dtype!(i8, Type::Int8);
+impl_dtype!(u8, Type::UInt8);
+impl_dtype!(i16, Type::Int16);
+impl_dtype!(i32, Type::Int32);
+impl_dtype!(i64, Type::Int64);
+//impl_dtype!(String, Type::String);
 
 pub trait Delegate {
     fn as_mut_ptr(&mut self) -> *mut ffi::TfLiteDelegate;

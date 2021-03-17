@@ -8,10 +8,12 @@ edition = "2018"
 
 [dependencies]
 tensorflow-lite-sys = { git = "https://github.com/songww/tensorflow-lite-sys", branch = "main" }
-num-complex = "0.3"
+thiserror = "1.0"
 num-traits = "0.2"
 num-derive = "0.3"
-thiserror = "1.0"
+num-complex = { version = "0.3", optional = true }
+f128 = { version = "0.2", optional = true }
+half = { version = "1.7", optional = true }
 
 [features]
 default = [ "v2.4", "xnnpack" ]
@@ -21,3 +23,4 @@ metal = [ "tensorflow-lite-sys/metal" ]
 coreml = [ "tensorflow-lite-sys/coreml" ]
 xnnpack = [ "tensorflow-lite-sys/xnnpack" ]
 experimental = [ "tensorflow-lite-sys/experimental" ]
+complex = [ "num-complex" ]
