@@ -1,5 +1,7 @@
+use std::convert::TryInto;
 use std::ffi::{c_void, CStr, CString};
 use std::path::Path;
+
 use tensorflow_lite_sys as ffi;
 
 #[macro_use]
@@ -199,8 +201,6 @@ pub enum TFLiteError {
     InterpreterError, // (#[from] ffi::TfLiteStatus_kTfLiteError),
 }
 
-pub type Result = std::result::Result<(), TFLiteError>;
-
 #[derive(FromPrimitive, ToPrimitive)]
 #[repr(u32)]
 pub enum TFLiteStatus {
@@ -210,9 +210,13 @@ pub enum TFLiteStatus {
     Ok = ffi::TfLiteStatus_kTfLiteOk,
 }
 
-impl From<TFLiteStatus> for Result {
-    fn from(status: TFLiteStatus) -> Self {
-        match status {
+type Result = std::result::Result<(), TFLiteError>;
+
+impl TryInto<()> for TFLiteStatus {
+    type Error = TFLiteError;
+
+    fn try_into(self) -> std::result::Result<(), TFLiteError> {
+        match self {
             TFLiteStatus::Ok => Ok(()),
             TFLiteStatus::ApplicationError => Err(TFLiteError::ApplicationError),
             TFLiteStatus::DelegateError => Err(TFLiteError::DelegateError),
@@ -221,7 +225,7 @@ impl From<TFLiteStatus> for Result {
     }
 }
 
-#[derive(FromPrimitive, ToPrimitive)]
+#[derive(FromPrimitive, ToPrimitive, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum Type {
     Bool = ffi::TfLiteType_kTfLiteBool,
@@ -247,7 +251,28 @@ impl Type {
     }
 }
 
-trait DType {
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Type::Bool => "bool",
+            Type::Complex64 => "Complex<f64>",
+            Type::Complex128 => "Complex<f128>",
+            Type::Float16 => "f16",
+            Type::Float32 => "f32",
+            Type::Float64 => "f64",
+            Type::Int8 => "i8",
+            Type::Int16 => "i16",
+            Type::Int32 => "i32",
+            Type::Int64 => "i64",
+            Type::NoType => "()",
+            Type::String => "string",
+            Type::UInt8 => "u8",
+        };
+        write!(f, "{}", name)
+    }
+}
+
+pub trait DType {
     fn dtype() -> Type;
 }
 
@@ -283,7 +308,8 @@ impl_dtype!(u8, Type::UInt8);
 impl_dtype!(i16, Type::Int16);
 impl_dtype!(i32, Type::Int32);
 impl_dtype!(i64, Type::Int64);
-//impl_dtype!(String, Type::String);
+impl_dtype!((), Type::NoType);
+impl_dtype!(CString, Type::String);
 
 pub trait Delegate {
     fn as_mut_ptr(&mut self) -> *mut ffi::TfLiteDelegate;
@@ -320,58 +346,58 @@ impl Drop for Model {
     }
 }
 
-pub struct MutableTensor {
-    ptr: *mut ffi::TfLiteTensor,
-    shape: Vec<usize>,
-    ndim: usize,
-}
-
-pub struct ImmutableTensor {
+pub struct Tensor {
     ptr: *const ffi::TfLiteTensor,
-    ndim: usize,
     shape: Vec<usize>,
+    ndim: usize,
 }
 
-pub trait TensorPtr {
-    fn as_ptr(&self) -> *const ffi::TfLiteTensor;
-}
-
-impl TensorPtr for MutableTensor {
-    fn as_ptr(&self) -> *const ffi::TfLiteTensor {
-        self.ptr
-    }
-}
-
-impl TensorPtr for ImmutableTensor {
-    fn as_ptr(&self) -> *const ffi::TfLiteTensor {
-        self.ptr
-    }
-}
-
-impl MutableTensor {
+impl Tensor {
     fn as_mut_ptr(&mut self) -> *mut ffi::TfLiteTensor {
+        self.ptr as _
+    }
+
+    pub fn into_raw(self) -> *const ffi::TfLiteTensor {
         self.ptr
     }
 
-    pub fn data_mut(&mut self) -> &mut [u8] {
+    pub fn from_raw(raw_ptr: *const ffi::TfLiteTensor) -> Self {
+        Self::from(raw_ptr)
+    }
+
+    pub fn data_mut<T>(&mut self) -> &mut [T]
+    where
+        T: DType,
+    {
+        assert_eq!(
+            self.dtype(),
+            T::dtype(),
+            "Tensor's dtype is {}, not {}",
+            self.dtype(),
+            T::dtype()
+        );
         unsafe {
             std::slice::from_raw_parts_mut(
-                ffi::TfLiteTensorData(self.as_mut_ptr()) as *mut u8,
-                ffi::TfLiteTensorByteSize(self.as_mut_ptr()),
+                ffi::TfLiteTensorData(self.as_mut_ptr()) as *mut T,
+                ffi::TfLiteTensorByteSize(self.as_mut_ptr()) / std::mem::size_of::<T>(),
             )
         }
     }
 
-    pub fn copy_from_buffer(&mut self, buffer: &[u8]) -> Result {
+    pub fn copy_from<T>(&mut self, buffer: &[T]) -> Result
+    where
+        T: DType,
+    {
+        assert_eq!(self.dtype(), T::dtype());
         TFLiteStatus::from_u32(unsafe {
             ffi::TfLiteTensorCopyFromBuffer(
                 self.as_mut_ptr(),
                 buffer.as_ptr() as *const c_void,
-                buffer.len(),
+                buffer.len() * std::mem::size_of::<T>(),
             )
         })
         .unwrap()
-        .into()
+        .try_into()
     }
 
     /*
@@ -380,19 +406,6 @@ impl MutableTensor {
     }
     */
 
-    pub fn from_raw(ptr: *mut ffi::TfLiteTensor) -> Self {
-        let mut shape = Vec::new();
-        let ndim = unsafe { ffi::TfLiteTensorNumDims(ptr) };
-        for dim in 0..ndim {
-            shape.push(unsafe { ffi::TfLiteTensorDim(ptr, dim) } as usize)
-        }
-        Self {
-            shape,
-            ptr,
-            ndim: ndim as usize,
-        }
-    }
-
     pub fn shape(&self) -> &[usize] {
         self.shape.as_slice()
     }
@@ -400,69 +413,56 @@ impl MutableTensor {
     pub fn ndim(&self) -> usize {
         self.ndim
     }
-}
 
-impl ImmutableTensor {
-    pub fn data(&self) -> &[u8] {
+    pub fn data<T>(&self) -> &[T]
+    where
+        T: DType,
+    {
+        assert_eq!(
+            self.dtype(),
+            T::dtype(),
+            "Tensor's dtype is {}, not {}",
+            self.dtype(),
+            T::dtype()
+        );
         unsafe {
             std::slice::from_raw_parts(
-                ffi::TfLiteTensorData(self.ptr) as *mut u8,
-                ffi::TfLiteTensorByteSize(self.ptr),
+                ffi::TfLiteTensorData(self.ptr) as *mut T,
+                ffi::TfLiteTensorByteSize(self.ptr) / std::mem::size_of::<T>(),
             )
         }
     }
 
-    pub fn copy_to_buffer(&self, buffer: &mut [u8]) -> Result {
+    fn as_ptr(&self) -> *const ffi::TfLiteTensor {
+        self.ptr as _
+    }
+
+    pub fn copy_to<T>(&self, buffer: &mut [T]) -> Result
+    where
+        T: DType,
+    {
+        assert_eq!(self.dtype(), T::dtype());
         TFLiteStatus::from_u32(unsafe {
             ffi::TfLiteTensorCopyToBuffer(
                 self.ptr,
                 buffer.as_mut_ptr() as *mut c_void,
-                buffer.len(),
+                buffer.len() * std::mem::size_of::<T>(),
             )
         })
         .unwrap()
-        .into()
+        .try_into()
     }
 
-    pub fn from_raw(ptr: *const ffi::TfLiteTensor) -> Self {
-        let mut shape = Vec::new();
-        let ndim = unsafe { ffi::TfLiteTensorNumDims(ptr) };
-        for dim in 0..ndim {
-            shape.push(unsafe { ffi::TfLiteTensorDim(ptr, dim) } as usize)
-        }
-        Self {
-            shape,
-            ptr,
-            ndim: ndim as usize,
-        }
-    }
-
-    pub fn shape(&self) -> &[usize] {
-        self.shape.as_slice()
-    }
-
-    pub fn ndim(&self) -> usize {
-        self.ndim
-    }
-}
-
-pub trait Tensor: TensorPtr {
     fn byte_size(&self) -> usize {
         unsafe { ffi::TfLiteTensorByteSize(self.as_ptr()) }
-    }
-
-    fn ndim(&self) -> i32 {
-        unsafe { ffi::TfLiteTensorNumDims(self.as_ptr()) }
     }
 
     fn dtype(&self) -> Type {
         Type::from_u32(unsafe { ffi::TfLiteTensorType(self.as_ptr()) }).unwrap()
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &CStr {
         unsafe { CStr::from_ptr(ffi::TfLiteTensorName(self.as_ptr())) }
-            .to_str()
-            .unwrap()
     }
 
     /*
@@ -475,8 +475,36 @@ pub trait Tensor: TensorPtr {
         */
 }
 
-impl Tensor for ImmutableTensor {}
-impl Tensor for MutableTensor {}
+impl From<*mut ffi::TfLiteTensor> for Tensor {
+    fn from(ptr: *mut ffi::TfLiteTensor) -> Self {
+        let mut shape = Vec::new();
+        let ndim = unsafe { ffi::TfLiteTensorNumDims(ptr) };
+        for dim in 0..ndim {
+            shape.push(unsafe { ffi::TfLiteTensorDim(ptr, dim) } as usize)
+        }
+        Self {
+            shape,
+            ptr,
+            ndim: ndim as usize,
+        }
+    }
+}
+
+impl From<*const ffi::TfLiteTensor> for Tensor {
+    fn from(ptr: *const ffi::TfLiteTensor) -> Self {
+        let mut shape = Vec::new();
+        let ndim = unsafe { ffi::TfLiteTensorNumDims(ptr) };
+        for dim in 0..ndim {
+            shape.push(unsafe { ffi::TfLiteTensorDim(ptr, dim) } as usize)
+        }
+        Self {
+            shape,
+            ptr,
+            ndim: ndim as usize,
+        }
+    }
+}
+
 /*
 TfLiteTensorFree⚠
 TfLiteTensorName⚠
@@ -488,9 +516,9 @@ TfLiteTensorType⚠
 
 pub struct Interpreter {
     ptr: *mut ffi::TfLiteInterpreter,
-    input_tensors: Vec<MutableTensor>,
+    input_tensors: Vec<Tensor>,
     input_tensor_count: i32,
-    output_tensors: Vec<ImmutableTensor>,
+    output_tensors: Vec<Tensor>,
     output_tensor_count: i32,
 }
 
@@ -498,7 +526,7 @@ impl Interpreter {
     pub fn allocate_tensors(&mut self) -> Result {
         TFLiteStatus::from_u32(unsafe { ffi::TfLiteInterpreterAllocateTensors(self.ptr) })
             .unwrap()
-            .into()
+            .try_into()
     }
 
     pub fn new(model: &Model) -> Self {
@@ -523,7 +551,7 @@ impl Interpreter {
         Self::from(ptr)
     }
 
-    pub fn get_input_tensor(&mut self, input_index: usize) -> Option<&mut MutableTensor> {
+    pub fn get_input_tensor(&mut self, input_index: usize) -> Option<&mut Tensor> {
         self.input_tensors.get_mut(input_index)
     }
 
@@ -531,7 +559,7 @@ impl Interpreter {
         self.input_tensor_count
     }
 
-    pub fn get_output_tensor(&self, output_index: usize) -> Option<&ImmutableTensor> {
+    pub fn get_output_tensor(&self, output_index: usize) -> Option<&Tensor> {
         self.output_tensors.get(output_index)
     }
 
@@ -542,14 +570,14 @@ impl Interpreter {
     pub fn invoke(&mut self) -> Result {
         TFLiteStatus::from_u32(unsafe { ffi::TfLiteInterpreterInvoke(self.ptr) })
             .unwrap()
-            .into()
+            .try_into()
     }
 
     #[cfg(feature = "experimental")]
     pub fn reset_variable_tensor(&mut self) -> Result {
         TFLiteStatus::from_u32(unsafe { ffi::TfLiteInterpreterResetVariableTensors(self.ptr) })
             .unwrap()
-            .into()
+            .try_into()
     }
 
     pub fn resize_input_tensor(&mut self, input_index: i32, input_dims: &[i32]) -> Result {
@@ -562,7 +590,7 @@ impl Interpreter {
             )
         })
         .unwrap()
-        .into()
+        .try_into()
     }
 }
 
@@ -575,7 +603,7 @@ impl From<*mut ffi::TfLiteInterpreter> for Interpreter {
 
         for input_index in 0..input_tensor_count {
             let tensor_ptr = unsafe { ffi::TfLiteInterpreterGetInputTensor(ptr, input_index) };
-            input_tensors.push(MutableTensor::from_raw(tensor_ptr));
+            input_tensors.push(Tensor::from_raw(tensor_ptr));
         }
 
         let output_tensor_count = unsafe { ffi::TfLiteInterpreterGetOutputTensorCount(ptr) };
@@ -584,7 +612,7 @@ impl From<*mut ffi::TfLiteInterpreter> for Interpreter {
 
         for output_index in 0..output_tensor_count {
             let tensor_ptr = unsafe { ffi::TfLiteInterpreterGetOutputTensor(ptr, output_index) };
-            output_tensors.push(ImmutableTensor::from_raw(tensor_ptr));
+            output_tensors.push(Tensor::from_raw(tensor_ptr));
         }
 
         Self {
